@@ -6,7 +6,14 @@
   <title>Крипто-облік</title>
   <meta name="description" content="Облік обміну гривень на USDT: баланс з кожною людиною, курс кожної операції, спільні книги для команди.">
   <meta name="theme-color" content="#0F1A2E">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232448C9'/%3E%3Ctext x='32' y='43' font-family='Arial' font-weight='700' font-size='30' text-anchor='middle' fill='white'%3E%E2%82%B4%3C/text%3E%3C/svg%3E">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Крипто-облік">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/favicon-64.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
@@ -40,6 +47,7 @@
         <p class="msg" id="authMsg" role="status"></p>
       </form>
       <p class="auth-invite" id="inviteNote" hidden></p>
+      <button class="btn ghost install-btn" type="button" data-install hidden>Встановити як застосунок</button>
     </section>
   </main>
 
@@ -63,16 +71,30 @@
         <div class="book-switch">
           <label class="sr" for="bookSelect">Книга обліку</label>
           <select id="bookSelect"></select>
-          <button class="btn ghost sm" type="button" id="membersBtn" title="Учасники і запрошення">Учасники <span class="count" id="membersCount"></span></button>
+          <button class="btn ghost sm" type="button" id="membersBtn" title="Учасники і запрошення" aria-label="Учасники і запрошення">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM22 19v-1a4 4 0 0 0-3-3.87M16 3.13a3.5 3.5 0 0 1 0 6.75" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="hide-sm">Учасники</span> <span class="count" id="membersCount"></span>
+          </button>
         </div>
         <div class="top-actions">
+          <button class="btn primary sm" type="button" data-install hidden>Встановити</button>
           <button class="icon-btn" type="button" id="themeBtn" aria-label="Змінити тему" title="Тема">◐</button>
           <button class="btn ghost sm" type="button" id="userBtn"><span class="avatar" id="userAvatar"></span><span id="userName" class="hide-sm"></span></button>
         </div>
       </div>
     </header>
 
+    <div class="offline-bar" id="offlineBar" hidden>Немає інтернету. Записи не оновлюються, нові операції не збережуться.</div>
+
     <main class="shell">
+      <div class="ios-hint" id="iosHint" hidden>
+        <div>
+          <b>Додай на екран «Додому»</b>
+          <span>Натисни <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> «Поділитися» внизу Safari, потім «На екран Додому». Сайт відкриватиметься як застосунок.</span>
+        </div>
+        <button class="icon-btn" type="button" id="iosHintClose" aria-label="Сховати підказку">✕</button>
+      </div>
+
       <!-- Підсумки -->
       <section class="board" aria-label="Підсумки">
         <div class="tile">
@@ -204,6 +226,13 @@
         </div>
       </div>
     </main>
+
+    <!-- Нижня панель для телефона -->
+    <nav class="mobile-bar" aria-label="Швидкі дії">
+      <button type="button" id="mbList"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Операції</span></button>
+      <button type="button" id="mbAdd" class="mb-add"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg><span>Нова</span></button>
+      <button type="button" id="mbPeople"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM22 19v-1a4 4 0 0 0-3-3.87M16 3.13a3.5 3.5 0 0 1 0 6.75" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Люди</span></button>
+    </nav>
   </div>
 
   <!-- ============ Учасники ============ -->
