@@ -327,7 +327,7 @@
     $("sUahN").textContent = nU ? `${nU} операц.` : "немає операцій";
     $("sUsdt").textContent = usdtS(usdtIn);
     $("sUsdtN").textContent = nT ? `${nT} операц.` : "немає операцій";
-    $("sRate").textContent = sumUsdt > 0 ? fRate.format(sumUah / sumUsdt) : "—";
+    $("sRate").textContent = sumUsdt > 0 ? fUah.format(sumUah / sumUsdt) : "—";
 
     let bal = 0, owers = 0;
     const scope = S.contactId ? S.contacts.filter((c) => c.id === S.contactId) : S.contacts;
@@ -741,6 +741,55 @@
     setMsg("userMsg", "Збережено.", "ok");
   });
   $("logoutBtn").addEventListener("click", async () => { $("userDlg").close(); await sb.auth.signOut(); });
+
+  // ---------- Застосунок на телефоні (PWA) ----------
+  const isStandalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  let installEvt = null;
+  const installBtns = () => document.querySelectorAll("[data-install]");
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault(); installEvt = e;
+    installBtns().forEach((b) => (b.hidden = false));
+  });
+  window.addEventListener("appinstalled", () => {
+    installEvt = null; installBtns().forEach((b) => (b.hidden = true)); toast("Застосунок встановлено");
+  });
+  installBtns().forEach((b) => b.addEventListener("click", async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    await installEvt.userChoice.catch(() => null);
+    installEvt = null; installBtns().forEach((x) => (x.hidden = true));
+  }));
+
+  // iPhone / iPad: кнопки встановлення немає, показуємо підказку
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  let hintOff = false; try { hintOff = localStorage.getItem("iosHintOff") === "1"; } catch {}
+  if (isIOS && !isStandalone() && !hintOff) $("iosHint").hidden = false;
+  $("iosHintClose").addEventListener("click", () => {
+    $("iosHint").hidden = true; try { localStorage.setItem("iosHintOff", "1"); } catch {}
+  });
+
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+
+  // Без інтернету
+  const syncOnline = () => { $("offlineBar").hidden = navigator.onLine; };
+  window.addEventListener("online", () => { syncOnline(); if (S.bookId) reloadData(); });
+  window.addEventListener("offline", syncOnline);
+  syncOnline();
+
+  // Нижня панель на телефоні
+  const scrollToEl = (node) => {
+    const top = node.getBoundingClientRect().top + window.scrollY - 70;
+    window.scrollTo({ top, behavior: "smooth" });
+  };
+  $("mbAdd").addEventListener("click", () => {
+    if (S.editingOp) resetOpForm(true);
+    scrollToEl($("opTitle").closest(".panel"));
+    setTimeout(() => (KINDS[currentKind()].asset === "uah" ? $("fUah") : $("fUsdt")).focus({ preventScroll: true }), 350);
+  });
+  $("mbList").addEventListener("click", () => scrollToEl($("listTitle").closest(".panel")));
+  $("mbPeople").addEventListener("click", () => scrollToEl($("peopleTitle").closest(".panel")));
 
   // ---------- Старт ----------
   setAuthMode("login");
