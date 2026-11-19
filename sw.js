@@ -1,7 +1,7 @@
 /* Service worker: дозволяє встановити сайт як застосунок і швидко відкривати його.
    Власні файли — спершу з мережі (щоб оновлення приходили одразу), без мережі — з кешу.
    Шрифти та бібліотека supabase-js — з кешу. Запити до бази Supabase не кешуються. */
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = "crypto-oblik-" + VERSION;
 const SHELL = [
   "./",
