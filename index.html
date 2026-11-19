@@ -129,6 +129,10 @@
           <form id="contactForm" class="contact-form" hidden>
             <input id="cName" type="text" placeholder="Ім'я або нік" required maxlength="80" aria-label="Ім'я">
             <div class="with-unit"><input id="cRate" type="text" inputmode="decimal" placeholder="Звичайний курс" aria-label="Звичайний курс"><span>₴/₮</span></div>
+            <div id="cLinkBox" hidden>
+              <select id="cLink" aria-label="Чи це учасник книги"></select>
+              <p class="muted small" style="margin:4px 0 0">Якщо людина — учасник книги, вона бачитиме ці операції у себе навпаки: твоє «дав гривні» в неї буде «мені дали», і борг — у неї.</p>
+            </div>
             <div class="row-btns">
               <button class="btn primary sm" type="submit" id="cSave">Зберегти</button>
               <button class="btn ghost sm" type="button" id="cCancel">Скасувати</button>
