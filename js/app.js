@@ -259,8 +259,53 @@
       const { data: profs } = await sb.from("profiles").select("id, display_name").in("id", ids);
       for (const p of profs || []) S.profiles[p.id] = p.display_name;
     }
-    if (S.contactId && !S.contacts.some((x) => x.id === S.contactId)) S.contactId = "";
+    buildView();
+    if (S.contactId && !S.parties.has(S.contactId)) S.contactId = "";
     renderAll();
+  }
+
+  // ---------- Погляд з боку того, хто дивиться ----------
+  // Сторона (party) — з ким у мене рахунок: звичайна людина ("c:<id>") або інший учасник книги ("u:<userId>").
+  // Якщо операцію записав інший учасник і вказав мене як людину, я бачу її навпаки:
+  // «Я дав гривні» у нього = «Мені дали гривні» у мене, і борг — мій.
+  const INV = { uah_out: "uah_in", uah_in: "uah_out", usdt_in: "usdt_out", usdt_out: "usdt_in" };
+  const memberName = (id) => S.profiles[id] || "Учасник";
+  const keyOfContact = (c) => (c.linked_user ? "u:" + c.linked_user : "c:" + c.id);
+  function buildView() {
+    const me = S.user.id, parties = new Map();
+    const add = (key, name, userId) => {
+      if (!parties.has(key)) parties.set(key, { key, name, userId: userId || null, contact: null, rate: null });
+      return parties.get(key);
+    };
+    for (const m of S.members) if (m.user_id !== me) add("u:" + m.user_id, memberName(m.user_id), m.user_id);
+    for (const c of S.contacts) {
+      if (c.linked_user === me) continue; // це я в записах іншого учасника
+      const p = add(keyOfContact(c), c.linked_user ? memberName(c.linked_user) : c.name, c.linked_user);
+      if (!p.contact) p.contact = c;
+    }
+    S.vops = S.ops.map((o) => {
+      const c = S.contacts.find((x) => x.id === o.contact_id);
+      if (c && c.linked_user === me && o.created_by && o.created_by !== me) {
+        add("u:" + o.created_by, memberName(o.created_by), o.created_by);
+        return { ...o, key: "u:" + o.created_by, vkind: INV[o.kind], mine: false, mirrored: true };
+      }
+      return { ...o, key: c ? keyOfContact(c) : "c:?", vkind: o.kind, mine: o.created_by === me, mirrored: false };
+    });
+    for (const p of parties.values()) {
+      p.rate = p.contact?.rate ?? (p.userId ? S.contacts.find((c) => c.linked_user === me && c.created_by === p.userId)?.rate : null) ?? null;
+    }
+    S.parties = parties;
+  }
+
+  async function contactIdForParty(key) {
+    const p = S.parties.get(key);
+    if (!p) throw new Error("Вибери людину.");
+    if (p.contact) return p.contact.id;
+    const { data, error } = await sb.from("contacts")
+      .insert({ book_id: S.bookId, name: p.name, linked_user: p.userId, rate: p.rate, created_by: S.user.id })
+      .select().single();
+    if (error) throw error;
+    return data.id;
   }
 
   function subscribe(id) {
@@ -283,14 +328,14 @@
     if (S.period === "custom") return (!S.from || d >= S.from) && (!S.to || d <= S.to);
     return true;
   }
-  const visibleOps = () => S.ops.filter((o) => inPeriod(o.op_date) && (!S.contactId || o.contact_id === S.contactId));
-  function balanceOf(contactId) {
+  const visibleOps = () => (S.vops || []).filter((o) => inPeriod(o.op_date) && (!S.contactId || o.key === S.contactId));
+  function balanceOf(key) {
     let usdt = 0, uah = 0, n = 0;
-    for (const o of S.ops) if (o.contact_id === contactId) { const s = KINDS[o.kind].sign; usdt += s * o.usdt; uah += s * o.uah; n++; }
+    for (const o of S.vops || []) if (o.key === key) { const s = KINDS[o.vkind].sign; usdt += s * o.usdt; uah += s * o.uah; n++; }
     return { usdt, uah, n };
   }
-  const contactName = (id) => S.contacts.find((c) => c.id === id)?.name || "—";
-  const isMine = (o) => o.created_by === S.user.id || S.role === "owner";
+  const contactName = (key) => S.parties?.get(key)?.name || "—";
+  const canDelete = (o) => o.mine || S.role === "owner";
   function balWords(usdt) {
     if (usdt > 0.004) return { cls: "pos", word: "винен тобі" };
     if (usdt < -0.004) return { cls: "neg", word: "ти винен" };
@@ -319,8 +364,8 @@
     const list = visibleOps();
     let uahOut = 0, usdtIn = 0, nU = 0, nT = 0, sumUah = 0, sumUsdt = 0;
     for (const o of list) {
-      if (o.kind === "uah_out") { uahOut += o.uah; nU++; }
-      if (o.kind === "usdt_in") { usdtIn += o.usdt; nT++; }
+      if (o.vkind === "uah_out") { uahOut += o.uah; nU++; }
+      if (o.vkind === "usdt_in") { usdtIn += o.usdt; nT++; }
       if (o.usdt > 0) { sumUah += o.uah; sumUsdt += o.usdt; }
     }
     $("sUah").textContent = uahS(uahOut);
@@ -330,8 +375,8 @@
     $("sRate").textContent = sumUsdt > 0 ? fUah.format(sumUah / sumUsdt) : "—";
 
     let bal = 0, owers = 0;
-    const scope = S.contactId ? S.contacts.filter((c) => c.id === S.contactId) : S.contacts;
-    for (const c of scope) { const b = balanceOf(c.id).usdt; bal += b; if (Math.abs(b) > 0.004) owers++; }
+    const scope = S.contactId ? [S.contactId] : [...S.parties.keys()];
+    for (const k of scope) { const b = balanceOf(k).usdt; bal += b; if (Math.abs(b) > 0.004) owers++; }
     const w = balWords(bal);
     $("sBalK").textContent = S.contactId ? `Баланс · ${contactName(S.contactId)}` : (bal > 0.004 ? "Тобі винні разом" : bal < -0.004 ? "Ти винен разом" : "Баланс");
     $("sBal").textContent = usdtS(Math.abs(bal));
@@ -342,22 +387,22 @@
   function renderPeople() {
     const box = $("peopleList"); box.replaceChildren();
     $("allPeople").setAttribute("aria-pressed", String(!S.contactId));
-    $("allCount").textContent = S.contacts.length ? String(S.contacts.length) : "";
-    if (!S.contacts.length) {
+    $("allCount").textContent = S.parties.size ? String(S.parties.size) : "";
+    if (!S.parties.size) {
       box.append(el("p", { class: "empty-side", text: "Додай людину, з якою міняєш гривні на USDT." }));
       return;
     }
-    const rows = S.contacts.map((c) => ({ c, b: balanceOf(c.id) }))
-      .sort((x, y) => Math.abs(y.b.usdt) - Math.abs(x.b.usdt) || x.c.name.localeCompare(y.c.name, "uk"));
-    for (const { c, b } of rows) {
+    const rows = [...S.parties.values()].map((p) => ({ p, b: balanceOf(p.key) }))
+      .sort((x, y) => Math.abs(y.b.usdt) - Math.abs(x.b.usdt) || x.p.name.localeCompare(y.p.name, "uk"));
+    for (const { p, b } of rows) {
       const w = balWords(b.usdt);
       box.append(el("button", {
-        type: "button", class: "person", "aria-pressed": String(S.contactId === c.id),
-        onclick: () => selectContact(S.contactId === c.id ? "" : c.id),
+        type: "button", class: "person", "aria-pressed": String(S.contactId === p.key),
+        onclick: () => selectContact(S.contactId === p.key ? "" : p.key),
       },
-        el("span", { class: "p-name", text: c.name }),
+        el("span", { class: "p-name" }, p.name, p.userId ? el("span", { class: "member-tag", text: "учасник" }) : null),
         el("span", { class: "p-bal " + w.cls }, Math.abs(b.usdt) > 0.004 ? signed(b.usdt, usdtS) : "0 ₮", el("small", { text: w.word })),
-        el("span", { class: "p-sub", text: c.rate ? `курс ${fRate.format(c.rate)}` : "курс не задано" })));
+        el("span", { class: "p-sub", text: p.rate ? `курс ${fRate.format(p.rate)}` : "курс не задано" })));
     }
   }
 
@@ -370,28 +415,30 @@
 
   function renderContactCard() {
     const box = $("contactCard"); box.replaceChildren();
-    const c = S.contacts.find((x) => x.id === S.contactId);
-    box.hidden = !c; if (!c) return;
-    const b = balanceOf(c.id), w = balWords(b.usdt);
-    const rate = c.rate || (b.usdt ? Math.abs(b.uah / b.usdt) : null);
+    const p = S.parties.get(S.contactId);
+    box.hidden = !p; if (!p) return;
+    const b = balanceOf(p.key), w = balWords(b.usdt);
+    const rate = p.rate || (b.usdt ? Math.abs(b.uah / b.usdt) : null);
+    const who = p.userId ? "Учасник книги: бачить ці операції у себе навпаки" : null;
     box.append(
-      el("div", {}, el("h3", { text: c.name }),
-        el("div", { class: "cc-sub", text: `${b.n} операц. · звичайний курс: ${c.rate ? fRate.format(c.rate) + " ₴/₮" : "не задано"}` })),
+      el("div", {}, el("h3", { text: p.name }),
+        el("div", { class: "cc-sub", text: `${b.n} операц. · звичайний курс: ${p.rate ? fRate.format(p.rate) + " ₴/₮" : "не задано"}` }),
+        who ? el("div", { class: "cc-sub", text: who }) : null),
       el("div", {},
         el("div", { class: "cc-bal " + w.cls, text: Math.abs(b.usdt) > 0.004 ? usdtS(Math.abs(b.usdt)) : "0 ₮" }),
         el("div", { class: "cc-sub", style: "text-align:right", text: w.word + (Math.abs(b.usdt) > 0.004 && rate ? ` · ≈ ${uahS(Math.abs(b.usdt) * rate)}` : "") })),
       el("div", { class: "cc-actions" },
-        Math.abs(b.usdt) > 0.004 ? el("button", { class: "btn primary sm", type: "button", text: b.usdt > 0 ? "Записати повернення боргу" : "Записати мою виплату", onclick: () => settle(c, b) }) : null,
-        el("button", { class: "btn ghost sm", type: "button", text: "Змінити людину", onclick: () => editContact(c) })));
+        Math.abs(b.usdt) > 0.004 ? el("button", { class: "btn primary sm", type: "button", text: b.usdt > 0 ? "Записати повернення боргу" : "Записати мою виплату", onclick: () => settle(p, b) }) : null,
+        p.contact ? el("button", { class: "btn ghost sm", type: "button", text: "Змінити людину", onclick: () => editContact(p.contact) }) : null));
   }
 
-  function settle(c, b) {
+  function settle(p, b) {
     resetOpForm(false);
     setKind(b.usdt > 0 ? "usdt_in" : "usdt_out");
-    $("opContact").value = c.id;
+    $("opContact").value = p.key;
     $("fUsdt").value = plain(Math.abs(b.usdt), 6);
     S.edited = ["usdt"];
-    $("fRate").value = c.rate ? plain(c.rate, 4) : "";
+    $("fRate").value = p.rate ? plain(p.rate, 4) : "";
     recompute();
     $("opForm").scrollIntoView({ behavior: "smooth", block: "start" });
     $("fUah").focus();
@@ -412,22 +459,22 @@
       box.append(el("div", { class: "empty" },
         el("span", { class: "glyph", text: "₴ ⇄ ₮" }),
         el("b", { text: S.ops.length ? "За цей період операцій немає" : "Ще немає жодної операції" }),
-        el("span", { text: S.ops.length ? "Зміни період або вибери іншу людину." : (S.contacts.length ? "Заповни форму вище: скільки гривень дав або скільки USDT отримав." : "Почни з того, що додаси людину зліва, а потім запиши першу операцію.") })));
+        el("span", { text: S.ops.length ? "Зміни період або вибери іншу людину." : (S.parties.size ? "Заповни форму вище: скільки гривень дав або скільки USDT отримав." : "Почни з того, що додаси людину зліва, а потім запиши першу операцію.") })));
       return;
     }
     const multi = S.members.length > 1;
     let lastDay = "";
     for (const o of list) {
       if (o.op_date !== lastDay) { lastDay = o.op_date; box.append(el("div", { class: "day", text: dayTitle(o.op_date) })); }
-      const k = KINDS[o.kind];
+      const k = KINDS[o.vkind];
       const isUah = k.asset === "uah";
       const main = isUah ? (k.sign > 0 ? "−" : "+") + uahS(o.uah) : (k.sign > 0 ? "−" : "+") + usdtS(o.usdt);
       const second = isUah ? `= ${usdtS(o.usdt)}` : `= ${uahS(o.uah)}`;
       const meta = [o.method, o.method_detail, o.note].filter(Boolean).join(" · ");
       const author = S.profiles[o.created_by];
       const acts = el("div", { class: "op-acts" });
-      if (isMine(o)) {
-        acts.append(el("button", { type: "button", text: "Змінити", onclick: () => editOp(o) }));
+      if (canDelete(o)) {
+        if (o.mine) acts.append(el("button", { type: "button", text: "Змінити", onclick: () => editOp(o) }));
         const del = el("button", { type: "button", text: "Видалити" });
         let armed = false, t;
         del.addEventListener("click", async () => {
@@ -442,10 +489,10 @@
       box.append(el("div", { class: "op" },
         el("span", { class: "op-ic " + k.asset, text: isUah ? "₴" : "₮" }),
         el("div", { class: "op-main" },
-          el("b", { text: `${k.title} · ${contactName(o.contact_id)}` }),
+          el("b", { text: `${k.title} · ${contactName(o.key)}` }),
           el("div", { class: "op-meta" },
             meta || null,
-            multi && author ? el("span", { class: "by" }, meta ? " · " : "", avatar(o.created_by, author), author) : null)),
+            multi && author ? el("span", { class: "by" }, meta ? " · " : "", avatar(o.created_by, author), o.mine ? "записав ти" : "записав " + author) : null)),
         el("div", { class: "op-amt" },
           el("div", { class: "a1 " + (k.sign > 0 ? "neg" : "pos"), text: main }),
           el("div", { class: "a2", text: `${second} · курс ${o.rate ? fRate.format(o.rate) : "—"}` })),
@@ -460,6 +507,14 @@
     $("cName").value = c ? c.name : "";
     $("cRate").value = c && c.rate ? plain(c.rate, 4) : "";
     $("cSave").textContent = c ? "Зберегти" : "Додати";
+    const others = S.members.filter((m) => m.user_id !== S.user.id);
+    const sel = $("cLink"); sel.replaceChildren(el("option", { value: "", text: "Не учасник книги" }));
+    for (const m of others) {
+      const taken = S.contacts.some((x) => x.linked_user === m.user_id && (!c || x.id !== c.id));
+      if (!taken) sel.append(el("option", { value: m.user_id, text: "Це учасник: " + memberName(m.user_id) }));
+    }
+    sel.value = c && c.linked_user ? c.linked_user : "";
+    $("cLinkBox").hidden = sel.options.length < 2;
     $("cDelete").hidden = !c || !(c.created_by === S.user.id || S.role === "owner");
     $("cDelete").textContent = "Видалити";
     $("cName").focus();
@@ -473,23 +528,24 @@
     const r = parseNum($("cRate").value);
     if (!name) return;
     const rate = isNaN(r) || r <= 0 ? null : r;
+    const linked_user = $("cLinkBox").hidden ? (S.editingContact?.linked_user ?? null) : ($("cLink").value || null);
     const btn = $("cSave"); btn.disabled = true;
     const q = S.editingContact
-      ? sb.from("contacts").update({ name, rate }).eq("id", S.editingContact.id).select().single()
-      : sb.from("contacts").insert({ name, rate, book_id: S.bookId, created_by: S.user.id }).select().single();
+      ? sb.from("contacts").update({ name, rate, linked_user }).eq("id", S.editingContact.id).select().single()
+      : sb.from("contacts").insert({ name, rate, linked_user, book_id: S.bookId, created_by: S.user.id }).select().single();
     const { data, error } = await q;
     btn.disabled = false;
     if (error) { toast(errText(error)); return; }
     $("contactForm").hidden = true;
     toast(S.editingContact ? "Збережено" : `${name} додано`);
     await reloadData();
-    selectContact(data.id);
+    selectContact(keyOfContact(data));
   });
   let cDelArmed = false;
   $("cDelete").addEventListener("click", async () => {
     const c = S.editingContact; if (!c) return;
     if (!cDelArmed) {
-      cDelArmed = true; $("cDelete").textContent = `Видалити разом з ${balanceOf(c.id).n} операц.?`;
+      cDelArmed = true; $("cDelete").textContent = `Видалити разом з ${S.ops.filter((o) => o.contact_id === c.id).length} операц.?`;
       setTimeout(() => { cDelArmed = false; $("cDelete").textContent = "Видалити"; }, 4000); return;
     }
     cDelArmed = false;
@@ -523,17 +579,17 @@
 
   function renderContactSelect() {
     const sel = $("opContact"), prev = sel.value; sel.replaceChildren();
-    if (!S.contacts.length) sel.append(el("option", { value: "", text: "Спершу додай людину" }));
+    if (!S.parties.size) sel.append(el("option", { value: "", text: "Спершу додай людину" }));
     else sel.append(el("option", { value: "", text: "Вибери людину…" }));
-    for (const c of S.contacts) sel.append(el("option", { value: c.id, text: c.name }));
+    for (const p of S.parties.values()) sel.append(el("option", { value: p.key, text: p.name + (p.userId ? " (учасник)" : "") }));
     sel.append(el("option", { value: "__new", text: "+ Нова людина…" }));
     const want = S.contactId || prev;
-    if (want && S.contacts.some((c) => c.id === want)) sel.value = want;
+    if (want && S.parties.has(want)) sel.value = want;
   }
   function onContactChange() {
     const v = $("opContact").value;
     if (v === "__new") { $("opContact").value = ""; openContactForm(null); return; }
-    const c = S.contacts.find((x) => x.id === v);
+    const c = S.parties.get(v);
     if (!S.edited.includes("rate")) { $("fRate").value = c && c.rate ? plain(c.rate, 4) : ""; }
     recompute();
   }
@@ -577,7 +633,7 @@
     const v = vals(), line = $("rateLine"); line.replaceChildren();
     if (v.uah > 0 && v.usdt > 0) {
       const rate = v.uah / v.usdt;
-      const c = S.contacts.find((x) => x.id === $("opContact").value);
+      const c = S.parties?.get($("opContact").value);
       line.append("Курс операції: ", el("b", { text: fRate.format(rate) }), " ₴ за 1 USDT · ",
         el("span", { class: "num", text: `${uahS(v.uah)} = ${usdtS(v.usdt)}` }));
       if (c && c.rate && Math.abs(rate - c.rate) >= 0.005) {
@@ -601,8 +657,8 @@
 
   function editOp(o) {
     S.editingOp = o;
-    setKind(o.kind);
-    $("opContact").value = o.contact_id;
+    setKind(o.vkind);
+    $("opContact").value = o.key;
     $("fUah").value = plain(o.uah, 2); $("fUsdt").value = plain(o.usdt, 6);
     S.edited = ["uah", "usdt"]; setAuto(null); $("fRate").value = ""; recompute();
     $("opMethod").value = o.method || $("opMethod").value; $("opDetail").value = o.method_detail || "";
@@ -613,10 +669,14 @@
 
   $("opForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const v = vals(), contact_id = $("opContact").value;
-    if (!contact_id || contact_id === "__new") { setMsg("opMsg", "Вибери людину.", "err"); return; }
+    const v = vals(), partyKey = $("opContact").value;
+    if (!partyKey || partyKey === "__new") { setMsg("opMsg", "Вибери людину.", "err"); return; }
     if (!(v.uah > 0 && v.usdt > 0)) { setMsg("opMsg", "Потрібні обидві суми: введи суму і курс, або суму в гривнях і в USDT.", "err"); return; }
     if (!$("opDate").value) { setMsg("opMsg", "Вкажи дату.", "err"); return; }
+    const party = S.parties.get(partyKey);
+    let contact_id;
+    try { contact_id = await contactIdForParty(partyKey); }
+    catch (err) { setMsg("opMsg", errText(err), "err"); return; }
     const row = {
       kind: currentKind(), contact_id,
       uah: Math.round(v.uah * 100) / 100, usdt: Math.round(v.usdt * 1e6) / 1e6,
@@ -631,11 +691,10 @@
     btn.disabled = false;
     if (error) { setMsg("opMsg", errText(error), "err"); return; }
     setMsg("opMsg", "");
-    const c = S.contacts.find((x) => x.id === contact_id);
-    if (c && !c.rate) {
-      await sb.from("contacts").update({ rate: Math.round((row.uah / row.usdt) * 1e4) / 1e4 }).eq("id", c.id);
-      toast(`Записано. Курс ${fRate.format(row.uah / row.usdt)} збережено як звичайний для ${c.name}`);
-    } else toast(editing ? "Зміни збережено" : "Операцію записано");
+    if (party && !party.rate) {
+      await sb.from("contacts").update({ rate: Math.round((row.uah / row.usdt) * 1e4) / 1e4 }).eq("id", contact_id);
+      toast(`Записано. Курс ${fRate.format(row.uah / row.usdt)} збережено як звичайний для ${party.name}`);
+    } else toast(editing ? "Зміни збережено" : (party?.userId ? `Записано. ${party.name} побачить це у себе` : "Операцію записано"));
     resetOpForm(false);
     await reloadData();
   });
@@ -657,7 +716,7 @@
     const q = (s) => `"${String(s ?? "").replace(/"/g, '""')}"`;
     const num = (n, d) => String(Number(n.toFixed(d))).replace(".", ",");
     const lines = [["Дата", "Тип", "Людина", "Гривні", "USDT", "Курс", "Спосіб", "Деталі", "Коментар", "Хто записав"].map(q).join(";")];
-    for (const o of list) lines.push([o.op_date, KINDS[o.kind].title, contactName(o.contact_id), num(o.uah, 2), num(o.usdt, 6),
+    for (const o of list) lines.push([o.op_date, KINDS[o.vkind].title, contactName(o.key), num(o.uah, 2), num(o.usdt, 6),
       o.rate ? num(o.rate, 4) : "", o.method, o.method_detail, o.note, S.profiles[o.created_by] || ""].map(q).join(";"));
     const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = el("a", { href: URL.createObjectURL(blob), download: `kripto-oblik-${today()}.csv` });
