@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Крипто-облік</title>
+  <meta name="description" content="Облік обміну гривень на USDT: баланс з кожною людиною, курс кожної операції, спільні книги для команди.">
+  <meta name="theme-color" content="#0F1A2E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232448C9'/%3E%3Ctext x='32' y='43' font-family='Arial' font-weight='700' font-size='30' text-anchor='middle' fill='white'%3E%E2%82%B4%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- ============ Вхід / реєстрація ============ -->
+  <main id="authView" class="auth" hidden>
+    <section class="auth-card">
+      <div class="brand brand-lg"><span class="mark">₴<i>⇄</i>₮</span><span>Крипто-облік</span></div>
+      <p class="auth-lead">Записуй, скільки гривень передав і скільки USDT отримав. Програма сама рахує курс і показує, хто кому винен.</p>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tabLogin" aria-selected="true">Вхід</button>
+        <button type="button" role="tab" id="tabSignup" aria-selected="false">Реєстрація</button>
+      </div>
+      <form id="authForm" class="stack" autocomplete="on">
+        <div class="field" id="nameField" hidden>
+          <label for="authName">Ім'я</label>
+          <input id="authName" type="text" autocomplete="nickname" placeholder="Як тебе показувати в групі">
+        </div>
+        <div class="field">
+          <label for="authEmail">Email</label>
+          <input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com">
+        </div>
+        <div class="field">
+          <label for="authPass">Пароль</label>
+          <input id="authPass" type="password" autocomplete="current-password" required minlength="6" placeholder="Щонайменше 6 символів">
+        </div>
+        <button class="btn primary big" type="submit" id="authSubmit">Увійти</button>
+        <button class="link" type="button" id="forgotBtn">Забув пароль?</button>
+        <p class="msg" id="authMsg" role="status"></p>
+      </form>
+      <p class="auth-invite" id="inviteNote" hidden></p>
+    </section>
+  </main>
+
+  <!-- ============ Новий пароль (після листа скидання) ============ -->
+  <main id="resetView" class="auth" hidden>
+    <section class="auth-card">
+      <div class="brand brand-lg"><span class="mark">₴<i>⇄</i>₮</span><span>Новий пароль</span></div>
+      <form id="resetForm" class="stack">
+        <div class="field"><label for="newPass">Новий пароль</label><input id="newPass" type="password" autocomplete="new-password" required minlength="6"></div>
+        <button class="btn primary big" type="submit">Зберегти пароль</button>
+        <p class="msg" id="resetMsg" role="status"></p>
+      </form>
+    </section>
+  </main>
+
+  <!-- ============ Застосунок ============ -->
+  <div id="appView" hidden>
+    <header class="topbar">
+      <div class="topbar-in">
+        <div class="brand"><span class="mark">₴<i>⇄</i>₮</span><span class="brand-name">Крипто-облік</span></div>
+        <div class="book-switch">
+          <label class="sr" for="bookSelect">Книга обліку</label>
+          <select id="bookSelect"></select>
+          <button class="btn ghost sm" type="button" id="membersBtn" title="Учасники і запрошення">Учасники <span class="count" id="membersCount"></span></button>
+        </div>
+        <div class="top-actions">
+          <button class="icon-btn" type="button" id="themeBtn" aria-label="Змінити тему" title="Тема">◐</button>
+          <button class="btn ghost sm" type="button" id="userBtn"><span class="avatar" id="userAvatar"></span><span id="userName" class="hide-sm"></span></button>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell">
+      <!-- Підсумки -->
+      <section class="board" aria-label="Підсумки">
+        <div class="tile">
+          <span class="tile-k">Я передав гривень</span>
+          <span class="tile-v uah" id="sUah">0 ₴</span>
+          <span class="tile-s" id="sUahN"></span>
+        </div>
+        <div class="tile">
+          <span class="tile-k">Мені кинули USDT</span>
+          <span class="tile-v usdt" id="sUsdt">0 ₮</span>
+          <span class="tile-s" id="sUsdtN"></span>
+        </div>
+        <div class="tile">
+          <span class="tile-k">Середній курс</span>
+          <span class="tile-v" id="sRate">—</span>
+          <span class="tile-s">₴ за 1 USDT</span>
+        </div>
+        <div class="tile tile-bal">
+          <span class="tile-k" id="sBalK">Баланс</span>
+          <span class="tile-v" id="sBal">0 ₮</span>
+          <span class="tile-s" id="sBalS"></span>
+        </div>
+      </section>
+
+      <div class="layout">
+        <!-- Люди -->
+        <aside class="panel people" aria-labelledby="peopleTitle">
+          <div class="panel-head">
+            <h2 id="peopleTitle">Люди</h2>
+            <button class="btn ghost sm" type="button" id="addContactBtn">+ Додати</button>
+          </div>
+          <form id="contactForm" class="contact-form" hidden>
+            <input id="cName" type="text" placeholder="Ім'я або нік" required maxlength="80" aria-label="Ім'я">
+            <div class="with-unit"><input id="cRate" type="text" inputmode="decimal" placeholder="Звичайний курс" aria-label="Звичайний курс"><span>₴/₮</span></div>
+            <div class="row-btns">
+              <button class="btn primary sm" type="submit" id="cSave">Зберегти</button>
+              <button class="btn ghost sm" type="button" id="cCancel">Скасувати</button>
+              <button class="btn danger sm" type="button" id="cDelete" hidden>Видалити</button>
+            </div>
+          </form>
+          <button type="button" class="person all" id="allPeople" aria-pressed="true">
+            <span class="p-name">Усі люди</span><span class="p-bal muted" id="allCount"></span>
+          </button>
+          <div id="peopleList" class="people-list"></div>
+        </aside>
+
+        <div class="main-col">
+          <!-- Форма операції -->
+          <section class="panel" aria-labelledby="opTitle">
+            <div class="panel-head">
+              <h2 id="opTitle">Нова операція</h2>
+              <button class="link" type="button" id="cancelEdit" hidden>Скасувати редагування</button>
+            </div>
+            <form id="opForm" class="op-form" autocomplete="off" novalidate>
+              <div class="kinds" role="radiogroup" aria-label="Тип операції">
+                <label class="kind k-uah"><input type="radio" name="kind" value="uah_out" checked><span><b>Я дав гривні</b><small>готівка або на карту</small></span></label>
+                <label class="kind k-usdt"><input type="radio" name="kind" value="usdt_in"><span><b>Мені кинули USDT</b><small>на гаманець або біржу</small></span></label>
+                <details class="more-kinds">
+                  <summary>Інші типи</summary>
+                  <div class="kinds-mini">
+                    <label class="kind k-usdt mini"><input type="radio" name="kind" value="usdt_out"><span><b>Я кинув USDT</b></span></label>
+                    <label class="kind k-uah mini"><input type="radio" name="kind" value="uah_in"><span><b>Мені дали гривні</b></span></label>
+                  </div>
+                </details>
+              </div>
+
+              <div class="field">
+                <label for="opContact">Людина</label>
+                <select id="opContact" required></select>
+              </div>
+
+              <div class="calc">
+                <div class="field amt" data-f="uah">
+                  <label for="fUah">Гривні <span class="auto-tag">рахується</span></label>
+                  <div class="with-unit big"><input id="fUah" type="text" inputmode="decimal" placeholder="0"><span>₴</span></div>
+                </div>
+                <div class="calc-op" aria-hidden="true">⇄</div>
+                <div class="field amt" data-f="usdt">
+                  <label for="fUsdt">USDT <span class="auto-tag">рахується</span></label>
+                  <div class="with-unit big"><input id="fUsdt" type="text" inputmode="decimal" placeholder="0"><span>₮</span></div>
+                </div>
+                <div class="field amt rate-f" data-f="rate">
+                  <label for="fRate">Курс <span class="auto-tag">рахується</span></label>
+                  <div class="with-unit"><input id="fRate" type="text" inputmode="decimal" placeholder="0"><span>₴/₮</span></div>
+                </div>
+              </div>
+              <div class="rate-line" id="rateLine" aria-live="polite">Введи будь-які два числа: суму в гривнях, суму в USDT або курс. Третє програма порахує сама.</div>
+
+              <div class="grid2">
+                <div class="field">
+                  <label for="opMethod" id="methodLabel">Як передав</label>
+                  <select id="opMethod"></select>
+                </div>
+                <div class="field">
+                  <label for="opDetail" id="detailLabel">Карта / банк</label>
+                  <input id="opDetail" type="text" maxlength="80" placeholder="Моно, ****1234" list="detailList">
+                  <datalist id="detailList"></datalist>
+                </div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label for="opDate">Дата</label><input id="opDate" type="date" required></div>
+                <div class="field"><label for="opNote">Коментар</label><input id="opNote" type="text" maxlength="300" placeholder="Необов'язково"></div>
+              </div>
+              <button class="btn primary big" type="submit" id="opSave">Записати операцію</button>
+              <p class="msg" id="opMsg" role="status"></p>
+            </form>
+          </section>
+
+          <!-- Операції -->
+          <section class="panel" aria-labelledby="listTitle">
+            <div class="panel-head wrap">
+              <h2 id="listTitle">Операції</h2>
+              <div class="filters">
+                <div class="seg" role="group" aria-label="Період">
+                  <button type="button" data-period="all" aria-pressed="true">Усі</button>
+                  <button type="button" data-period="month" aria-pressed="false">Цей місяць</button>
+                  <button type="button" data-period="prev" aria-pressed="false">Минулий</button>
+                  <button type="button" data-period="custom" aria-pressed="false">Період</button>
+                </div>
+                <button class="btn ghost sm" type="button" id="exportBtn">CSV</button>
+              </div>
+            </div>
+            <div class="range" id="rangeBox" hidden>
+              <input type="date" id="fromDate" aria-label="Від"><span class="muted">—</span><input type="date" id="toDate" aria-label="До">
+            </div>
+            <div id="contactCard" class="contact-card" hidden></div>
+            <div id="opsList" class="ops"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ Учасники ============ -->
+  <dialog id="membersDlg" class="dlg">
+    <form method="dialog" class="dlg-head"><h2>Книга обліку</h2><button class="icon-btn" aria-label="Закрити">✕</button></form>
+    <div class="dlg-body stack">
+      <div class="field" id="renameBox">
+        <label for="bookName">Назва книги</label>
+        <div class="row-inline"><input id="bookName" type="text" maxlength="80"><button class="btn ghost sm" type="button" id="renameBtn">Зберегти</button></div>
+      </div>
+      <div class="invite">
+        <span class="tile-k">Код запрошення</span>
+        <div class="code" id="inviteCode">——</div>
+        <div class="row-inline wrap">
+          <button class="btn primary sm" type="button" id="copyLink">Скопіювати посилання</button>
+          <button class="btn ghost sm" type="button" id="copyCode">Скопіювати код</button>
+          <button class="btn ghost sm" type="button" id="rotateBtn" hidden>Новий код</button>
+        </div>
+        <p class="muted small">Хто відкриє посилання і зареєструється, побачить усі операції цієї книги та зможе додавати нові.</p>
+      </div>
+      <div>
+        <span class="tile-k">Учасники</span>
+        <ul class="members" id="membersList"></ul>
+      </div>
+      <hr>
+      <div class="field">
+        <label for="joinCode">Приєднатися до іншої книги</label>
+        <div class="row-inline"><input id="joinCode" type="text" placeholder="Код, напр. 4F9A21C0" maxlength="12"><button class="btn ghost sm" type="button" id="joinBtn">Приєднатися</button></div>
+      </div>
+      <div class="field">
+        <label for="newBookName">Створити нову книгу</label>
+        <div class="row-inline"><input id="newBookName" type="text" placeholder="Напр. Обмін з партнером" maxlength="80"><button class="btn ghost sm" type="button" id="newBookBtn">Створити</button></div>
+      </div>
+      <button class="btn danger sm" type="button" id="leaveBtn">Вийти з книги</button>
+      <p class="msg" id="dlgMsg" role="status"></p>
+    </div>
+  </dialog>
+
+  <!-- ============ Акаунт ============ -->
+  <dialog id="userDlg" class="dlg">
+    <form method="dialog" class="dlg-head"><h2>Акаунт</h2><button class="icon-btn" aria-label="Закрити">✕</button></form>
+    <div class="dlg-body stack">
+      <p class="muted" id="userEmail"></p>
+      <div class="field">
+        <label for="profName">Ім'я в групах</label>
+        <div class="row-inline"><input id="profName" type="text" maxlength="40"><button class="btn ghost sm" type="button" id="profSave">Зберегти</button></div>
+      </div>
+      <button class="btn danger sm" type="button" id="logoutBtn">Вийти з акаунта</button>
+      <p class="msg" id="userMsg" role="status"></p>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
