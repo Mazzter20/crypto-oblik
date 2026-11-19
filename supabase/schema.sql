@@ -183,6 +183,28 @@ create policy "contacts update" on public.contacts for update to authenticated
 create policy "contacts delete" on public.contacts for delete to authenticated
   using (created_by = (select auth.uid()) or private.is_owner(book_id));
 
+-- ---------- Прив'язка людини до учасника книги ----------
+-- Якщо контакт — це інший учасник книги (linked_user), він бачить операції зі свого боку:
+-- «Я дав гривні» у того, хто записав, стає «Мені дали гривні» і борг — у нього.
+alter table public.contacts add column linked_user uuid references auth.users(id) on delete set null;
+create unique index contacts_book_linked_uniq on public.contacts(book_id, linked_user) where linked_user is not null;
+create index contacts_linked_user_idx on public.contacts(linked_user);
+
+create or replace function private.valid_link(b uuid, u uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select u is null or exists (select 1 from public.book_members m where m.book_id = b and m.user_id = u);
+$$;
+revoke execute on function private.valid_link(uuid, uuid) from anon, public;
+grant execute on function private.valid_link(uuid, uuid) to authenticated;
+
+drop policy "contacts insert" on public.contacts;
+drop policy "contacts update" on public.contacts;
+create policy "contacts insert" on public.contacts for insert to authenticated
+  with check (private.is_member(book_id) and created_by = (select auth.uid())
+    and linked_user is distinct from (select auth.uid()) and private.valid_link(book_id, linked_user));
+create policy "contacts update" on public.contacts for update to authenticated
+  using (private.is_member(book_id)) with check (private.is_member(book_id) and private.valid_link(book_id, linked_user));
+
 create policy "ops read" on public.ops for select to authenticated
   using (private.is_member(book_id));
 create policy "ops insert" on public.ops for insert to authenticated
