@@ -31,7 +31,7 @@
   const $ = (id) => document.getElementById(id);
   const fUah = new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 2 });
   const fUsdt = new Intl.NumberFormat("uk-UA", { maximumFractionDigits: 2 });
-  const fRate = new Intl.NumberFormat("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  const fRate = new Intl.NumberFormat("uk-UA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const uahS = (n) => fUah.format(n) + " ₴";
   const usdtS = (n) => fUsdt.format(n) + " ₮";
   const signed = (n, f) => (n > 0.004 ? "+" : n < -0.004 ? "−" : "") + f(Math.abs(n));
@@ -203,6 +203,11 @@
     const { data: prof } = await sb.from("profiles").select("id, display_name").eq("id", S.user.id).maybeSingle();
     S.profile = prof || { id: S.user.id, display_name: S.user.email.split("@")[0] };
     renderUser();
+    if (!/[\p{L}\p{N}]/u.test(S.profile.display_name || "")) {
+      $("userEmail").textContent = S.user.email; $("profName").value = "";
+      setMsg("userMsg", "Вкажи своє ім'я, щоб інші учасники бачили, хто записав операцію.", "err");
+      $("userDlg").showModal();
+    }
 
     const pj = pendingJoin();
     let joined = null;
@@ -269,7 +274,11 @@
   // Якщо операцію записав інший учасник і вказав мене як людину, я бачу її навпаки:
   // «Я дав гривні» у нього = «Мені дали гривні» у мене, і борг — мій.
   const INV = { uah_out: "uah_in", uah_in: "uah_out", usdt_in: "usdt_out", usdt_out: "usdt_in" };
-  const memberName = (id) => S.profiles[id] || "Учасник";
+  const THIRD = { uah_out: "дав гривні", usdt_in: "отримав USDT", usdt_out: "кинув USDT", uah_in: "отримав гривні" };
+  const memberName = (id) => {
+    const n = (S.profiles[id] || "").trim();
+    return /[\p{L}\p{N}]/u.test(n) ? n : "Учасник без імені";
+  };
   const keyOfContact = (c) => (c.linked_user ? "u:" + c.linked_user : "c:" + c.id);
   function buildView() {
     const me = S.user.id, parties = new Map();
@@ -471,7 +480,11 @@
       const main = isUah ? (k.sign > 0 ? "−" : "+") + uahS(o.uah) : (k.sign > 0 ? "−" : "+") + usdtS(o.usdt);
       const second = isUah ? `= ${usdtS(o.usdt)}` : `= ${uahS(o.uah)}`;
       const meta = [o.method, o.method_detail, o.note].filter(Boolean).join(" · ");
-      const author = S.profiles[o.created_by];
+      const author = o.created_by ? memberName(o.created_by) : "";
+      // Чужий запис про третю людину: пишемо від імені автора, а не «Я»
+      const title = !o.mine && !o.mirrored && author
+        ? `${author} ${THIRD[o.vkind]} · ${contactName(o.key)}`
+        : `${k.title} · ${contactName(o.key)}`;
       const acts = el("div", { class: "op-acts" });
       if (canDelete(o)) {
         if (o.mine) acts.append(el("button", { type: "button", text: "Змінити", onclick: () => editOp(o) }));
@@ -489,10 +502,11 @@
       box.append(el("div", { class: "op" },
         el("span", { class: "op-ic " + k.asset, text: isUah ? "₴" : "₮" }),
         el("div", { class: "op-main" },
-          el("b", { text: `${k.title} · ${contactName(o.key)}` }),
+          el("b", { text: title }),
           el("div", { class: "op-meta" },
             meta || null,
-            multi && author ? el("span", { class: "by" }, meta ? " · " : "", avatar(o.created_by, author), o.mine ? "записав ти" : "записав " + author) : null)),
+            multi && author && meta ? " · " : null,
+            multi && author ? el("span", { class: "by" }, avatar(o.created_by, author), o.mine ? "записав ти" : "записав " + author) : null)),
         el("div", { class: "op-amt" },
           el("div", { class: "a1 " + (k.sign > 0 ? "neg" : "pos"), text: main }),
           el("div", { class: "a2", text: `${second} · курс ${o.rate ? fRate.format(o.rate) : "—"}` })),
@@ -507,11 +521,16 @@
     $("cName").value = c ? c.name : "";
     $("cRate").value = c && c.rate ? plain(c.rate, 4) : "";
     $("cSave").textContent = c ? "Зберегти" : "Додати";
-    const others = S.members.filter((m) => m.user_id !== S.user.id);
+    // Людину, яку додав інший учасник, можна позначити як «це я» — тоді його записи покажуться тобі навпаки
+    const canBeMe = c && c.created_by && c.created_by !== S.user.id;
+    const options = S.members.filter((m) => m.user_id !== S.user.id || canBeMe);
     const sel = $("cLink"); sel.replaceChildren(el("option", { value: "", text: "Не учасник книги" }));
-    for (const m of others) {
+    for (const m of options) {
+      if (c && m.user_id === c.created_by) continue;
       const taken = S.contacts.some((x) => x.linked_user === m.user_id && (!c || x.id !== c.id));
-      if (!taken) sel.append(el("option", { value: m.user_id, text: "Це учасник: " + memberName(m.user_id) }));
+      if (taken) continue;
+      const me = m.user_id === S.user.id;
+      sel.append(el("option", { value: m.user_id, text: me ? "Це я" : "Це учасник: " + memberName(m.user_id) }));
     }
     sel.value = c && c.linked_user ? c.linked_user : "";
     $("cLinkBox").hidden = sel.options.length < 2;
@@ -615,6 +634,7 @@
       if (isFinite(out) && out > 0) {
         $(FIELDS[t]).value = plain(out, t === "uah" ? 2 : t === "usdt" ? 2 : 4);
         setAuto(t);
+        S.autoValue = out; // точне значення, щоб курс зберігся без похибки округлення
       }
     } else if (S.autoField) {
       $(FIELDS[S.autoField]).value = ""; setAuto(null);
@@ -670,6 +690,7 @@
   $("opForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const v = vals(), partyKey = $("opContact").value;
+    if (S.autoField === "usdt" && S.autoValue > 0) v.usdt = S.autoValue;
     if (!partyKey || partyKey === "__new") { setMsg("opMsg", "Вибери людину.", "err"); return; }
     if (!(v.uah > 0 && v.usdt > 0)) { setMsg("opMsg", "Потрібні обидві суми: введи суму і курс, або суму в гривнях і в USDT.", "err"); return; }
     if (!$("opDate").value) { setMsg("opMsg", "Вкажи дату.", "err"); return; }
